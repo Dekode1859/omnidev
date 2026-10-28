@@ -1,8 +1,8 @@
 """A tiny stdio MCP server used by the MCP marketplace tests."""
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
-mcp = FastMCP("fake")
+mcp = MCPServer("fake")
 
 
 @mcp.tool()
