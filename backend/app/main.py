@@ -157,6 +157,7 @@ app.include_router(knowledge.router, prefix="/api/knowledge", tags=["Knowledge"]
 # prefix, so /mcp would 307 to /mcp/, and a redirected POST is exactly the
 # kind of thing MCP clients handle inconsistently. Registering the raw ASGI
 # handler on both spellings means the documented URL just works.
+# Build the SDK transport so its public manager owns the configured host checks.
 mcp_server.streamable_http_app(stateless_http=True, json_response=True)
 
 

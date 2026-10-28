@@ -85,7 +85,8 @@ IMAGE_CONTENT_TYPES = {
     ".gif": "image/gif",
 }
 
-# stateless_http: every HTTP request is independent, with no server-side
+# HTTP entry points configure stateless_http: every request is independent,
+# with no server-side
 # session to create, resume or leak. That is what lets the MCP surface be
 # mounted straight into the running backend (see app/main.py) instead of
 # spawning a separate stdio process per client, and it means several clients

@@ -99,6 +99,19 @@ Then, inside a Claude Code session:
 
 The server is a thin stdio bridge to the running backend (set `OMNIDEV_BACKEND_URL` if yours isn't on `http://127.0.0.1:8000`). From `backend/` you can also run it directly with `python -m app.mcp` or `make mcp`.
 
+OmniDev uses MCP Python SDK 2.3.0. Existing stdio registrations keep working:
+the 13 tool names and JSON input schemas are unchanged, and both legacy
+initialize-based clients and modern discovery-based clients are supported.
+After updating, reinstall the hashed dependencies with `make setup`.
+
+The running backend also exposes stateless Streamable HTTP at
+`http://127.0.0.1:8000/mcp` (or `/mcp/`); use your backend's actual port.
+Both paths answer directly without redirects or a session header. For a separate
+HTTP bridge, run `python -m app.mcp --http` from `backend/`. It defaults to
+`127.0.0.1:8765`; `OMNIDEV_MCP_HOST` and `OMNIDEV_MCP_PORT` configure that listener,
+while `OMNIDEV_BACKEND_URL` selects the backend the tools call. Without `--http`,
+startup remains stdio.
+
 MCP works in both directions: the app's **MCP Marketplace** installs curated servers (Filesystem, Fetch, Memory, Time, Git, Sequential Thinking) whose tools Gemma 4 calls from chat, flip the Tools toggle and watch every call land in the transcript. Only the curated catalog can be installed, folder access is scoped to directories you pick inside your home folder, and server processes never see backend credentials.
 
 ## The macOS App
