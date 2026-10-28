@@ -293,6 +293,13 @@ def test_mcp_stdio_handshake_lists_tools():
         proc.kill()
 
     assert responses[1]["result"]["serverInfo"]["name"] == "omnidev"
+    expected_schemas = json.loads(
+        (BACKEND_DIR / "tests/fixtures/mcp_tool_schemas.json").read_text(encoding="utf-8")
+    )
+    assert {
+        tool["name"]: tool["inputSchema"]
+        for tool in responses[2]["result"]["tools"]
+    } == expected_schemas
     tool_names = {t["name"] for t in responses[2]["result"]["tools"]}
     assert tool_names == {
         "local_llm",

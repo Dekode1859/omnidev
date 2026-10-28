@@ -37,7 +37,7 @@ def test_add_server_rejects_unknown_catalog_id():
 def test_add_server_rejects_path_outside_home(tmp_path, monkeypatch):
     monkeypatch.setattr(mcp.shutil, "which", lambda _: "/usr/bin/true")
     with pytest.raises(MCPError, match="inside your home folder"):
-        mcp.add_server("filesystem", {"directory": "/etc"})
+        mcp.add_server("filesystem", {"directory": pathlib.Path.home().anchor})
     with pytest.raises(MCPError, match="not an existing directory"):
         mcp.add_server("filesystem", {"directory": str(tmp_path / "missing")})
 
@@ -85,9 +85,15 @@ async def test_manager_lists_and_calls_tools(monkeypatch):
     manager = mcp.get_manager()
     tools = await manager.list_tools(record)
     assert [t["name"] for t in tools] == ["echo"]
+    assert tools[0]["input_schema"]["properties"]["text"]["type"] == "string"
+    assert tools[0]["input_schema"]["required"] == ["text"]
 
     result = await manager.call_tool(record, "echo", {"text": "hello"})
     assert result == "echo: hello"
+
+    # Invalid arguments must remain a tool error, not successful model input.
+    error = await manager.call_tool(record, "echo", {})
+    assert error.startswith("Tool error: ")
 
 
 @pytest.mark.asyncio
