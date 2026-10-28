@@ -6,6 +6,7 @@ import pathlib
 import subprocess
 import sys
 import threading
+import runpy
 
 import httpx
 import pytest
@@ -398,6 +399,53 @@ async def test_mounted_mcp_surface(monkeypatch):
             json={"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
         )
 
+        # An independent client can use either spelling without a session.
+        other = await client.post(
+            "/mcp/", headers=MCP_HEADERS,
+            json={"jsonrpc": "2.0", "id": 3, "method": "tools/list"},
+        )
+        assert other.status_code == 200
+        assert "mcp-session-id" not in other.headers
+        assert list(_mcp_payloads(other.text))[0]["result"] == list(
+            _mcp_payloads(cold.text)
+        )[0]["result"]
+
+        # The SDK must still enforce DNS rebinding protection on the exact routes.
+        refused = await client.post(
+            "/mcp", headers={**MCP_HEADERS, "Host": "untrusted.example:5555"},
+            json={"jsonrpc": "2.0", "id": 4, "method": "tools/list"},
+        )
+        assert refused.status_code == 421
+
+        # Exercise actual v2 discovery and tool dispatch over the mounted ASGI app,
+        # plus a separate client using the legacy initialize handshake.
+        import httpx2
+        from mcp.client import Client
+        from mcp.client.streamable_http import streamable_http_client
+        from app.main import app as real_app
+
+        def plan_only(request):
+            assert request.url.path == "/api/devops/plan"
+            return httpx.Response(200, json={"summary": "Nothing was executed."})
+
+        _use_handler(monkeypatch, plan_only)
+        expected_schemas = json.loads(
+            (BACKEND_DIR / "tests/fixtures/mcp_tool_schemas.json").read_text(encoding="utf-8")
+        )
+        for mode, path in (("auto", "/mcp"), ("legacy", "/mcp/")):
+            async with httpx2.AsyncClient(
+                transport=httpx2.ASGITransport(app=real_app, client=("127.0.0.1", 5555)),
+            ) as http_client:
+                transport = streamable_http_client(
+                    f"http://127.0.0.1:5555{path}", http_client=http_client,
+                )
+                async with Client(transport, mode=mode, read_timeout_seconds=10) as sdk_client:
+                    tools = await sdk_client.list_tools()
+                    assert {t.name: t.input_schema for t in tools.tools} == expected_schemas
+                    result = await sdk_client.call_tool("aws_plan", {"command": "stop instance i-123"})
+                    assert not result.is_error
+                    assert "Nothing was executed" in result.content[0].text
+
     assert cold.status_code == 200
     assert "mcp-session-id" not in {k.lower() for k in cold.headers}
     names = {t["name"] for t in list(_mcp_payloads(cold.text))[0]["result"]["tools"]}
@@ -413,3 +461,41 @@ def test_set_backend_url_respects_an_explicit_override(monkeypatch):
     monkeypatch.setattr(mcp_module, "_resolved_url", "http://example.invalid")
     mcp_module.set_backend_url("http://127.0.0.1:9999")
     assert mcp_module._resolved_url == "http://example.invalid"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["auto", "legacy"])
+async def test_sdk_client_stdio_from_another_directory(mode, tmp_path):
+    from mcp import StdioServerParameters
+    from mcp.client import Client
+
+    params = StdioServerParameters(
+        command=sys.executable,
+        args=[str(BACKEND_DIR / "mcp_server.py")],
+        cwd=str(tmp_path),
+        env={"OMNIDEV_BACKEND_URL": "http://127.0.0.1:1"},
+    )
+    async with Client(params, mode=mode, read_timeout_seconds=10) as client:
+        result = await client.list_tools()
+        expected = json.loads(
+            (BACKEND_DIR / "tests/fixtures/mcp_tool_schemas.json").read_text(encoding="utf-8")
+        )
+        assert {tool.name: tool.input_schema for tool in result.tools} == expected
+        # A real tools/call refusal must not contact the backend.
+        error = await client.call_tool("local_vision", {"image_path": str(tmp_path / "missing.png")})
+        assert error.is_error
+        assert "Error executing tool local_vision" in error.content[0].text
+
+
+@pytest.mark.parametrize("http", [False, True])
+def test_module_startup_transport_configuration(monkeypatch, http):
+    calls = []
+    monkeypatch.setattr(mcp_server.mcp, "run", lambda **kwargs: calls.append(kwargs))
+    monkeypatch.setattr(sys, "argv", ["app.mcp", *(["--http"] if http else [])])
+    monkeypatch.setenv("OMNIDEV_MCP_HOST", "localhost")
+    monkeypatch.setenv("OMNIDEV_MCP_PORT", "9876")
+    runpy.run_module("app.mcp", run_name="__main__")
+    assert calls == ([{
+        "transport": "streamable-http", "host": "localhost", "port": 9876,
+        "stateless_http": True, "json_response": True,
+    }] if http else [{}])
